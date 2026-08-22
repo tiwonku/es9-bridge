@@ -1,0 +1,194 @@
+# es9.toml -- configuration for es9_bridge.py
+#
+# Saved changes are hot-reloaded: channel settings, ranges, smoothing,
+# thresholds and OSC destinations all take effect without a restart.
+# Device settings (name, samplerate, blocksize, channels) need a restart.
+
+[device]
+# Substring match on the device name, or an integer index.
+# Run `python es9_bridge.py --list-devices` to find yours.
+name = "ES-9"
+
+# Host API. This matters more than anything else in this file.
+#
+#   auto              try asio, then wasapi-exclusive, then wdm-ks  (recommended)
+#   asio              the Expert Sleepers ASIO driver
+#   wasapi-exclusive  bypasses the Windows mixer entirely
+#   wdm-ks            kernel streaming, also bypasses the mixer
+#   wasapi / mme / directsound
+#                     SHARED MODE -- the Windows audio engine resamples and
+#                     mixes your signal. Fine for music, WRONG for CV. Only use
+#                     these to prove something, never to run a set.
+#
+# `auto` never falls back to a shared-mode API: if no exclusive path is
+# available it refuses to start rather than silently feeding you altered CV.
+hostapi = "auto"
+
+# Leave samplerate unset to auto-detect from the driver -- recommended.
+# A hardcoded mismatch is one of the things that causes queue drift.
+# samplerate = 48000
+
+# ASIO block size. Larger = more latency but more tolerance for hiccups.
+blocksize = 256
+
+# Which device input channels to read (0-based). The ES-9 exposes more
+# channels over USB than it has jacks; these are the first eight.
+channels = [0, 1, 2, 3, 4, 5, 6, 7]
+
+# Voltage at digital full scale. 10.0 is the sensible starting assumption
+# for the ES-9's DC-coupled inputs. To calibrate properly: patch a known
+# voltage (a quantizer at a known note, or a tuned VCO's CV) and adjust
+# this until the reported volts match.
+full_scale_volts = 10.0
+
+
+[osc]
+rate = 60.0              # value message rate, Hz
+event_rate = 1000.0      # gate/trigger polling rate -- gives sub-frame trigger timing
+address_prefix = "/es9"
+control_port = 7001      # listens for /bridge/calibrate/N and /bridge/reset
+
+
+# Add more [[destination]] blocks to fan out to other machines.
+# No code change needed -- the sender duplicates to every destination.
+[[destination]]
+host = "127.0.0.1"
+port = 7000
+
+# [[destination]]
+# host = "192.168.1.42"
+# port = 7000
+
+
+[status]
+port = 8080              # http://localhost:8080
+
+
+[network]
+# Address the status page and OSC control listener bind to.
+# 127.0.0.1 = this machine only. Windows Firewall never prompts.
+# 0.0.0.0    = reachable from other machines on your network. Windows WILL
+#              prompt once to allow Python through the firewall; tick "Private
+#              networks" only. Sending OSC OUT to other machines works either
+#              way -- this setting only affects what can reach IN.
+bind = "127.0.0.1"
+
+
+[watchdog]
+enabled = true
+liveness_timeout = 0.25  # seconds with no audio callback before declaring the stream dead
+
+# Staleness catches the "still moving but not responding" wraparound case,
+# which never raises a driver error.
+staleness_enabled = true
+frozen_blocks = 40       # N bit-identical blocks in a row -> frozen buffer
+repeat_window  = 30      # W-block window searched for an exact earlier repeat
+history        = 500     # blocks of signature history kept (~2.7 s at 48k/256)
+reopen_delay   = 0.15    # seconds to wait between close and reopen
+
+# ---------------------------------------------------------------------------
+# Channels. Keys are 1-8, matching the OSC addresses /es9/1 ... /es9/8.
+# Edit here or on the status page (http://localhost:8080); both hot-reload.
+#
+#   mode            lfo | clock | env | audio   (preset; knobs below still win)
+#   value           mean (DC / CV) or rms (audio amplitude)
+#   events          emit /gate and /trig (off for audio so it doesn't chatter)
+#   in_range        volts in  -> mapped from this
+#   out_range       values out -> mapped to this
+#   clamp           clip to out_range (true) or allow overshoot (false)
+#   smooth          0.0 = none, 0.9 = heavy. One-pole, applied at the OSC rate.
+#   gate_threshold  volts, evaluated at AUDIO rate so short triggers survive
+#   gate_hysteresis volts of dead band around the threshold, stops slow-edge chatter
+#   retrigger_lockout_ms
+#                   minimum gap between events on this channel. Hysteresis alone
+#                   cannot save a signal parked exactly on the threshold; this
+#                   hard-bounds the event rate. 1 ms allows up to 1 kHz triggers.
+#                   Raise it for noisy sources, lower it for audio-rate gates.
+#   send_minmax     also emit /es9/N/minmax as [min, max] volts for the frame
+# ---------------------------------------------------------------------------
+
+[channel.1]
+name = "ch1"
+mode = "audio"
+in_range = [0.0, 2.0]
+out_range = [0.0, 1.0]
+smooth = 0.35
+gate_threshold = 1.0
+gate_hysteresis = 0.2
+retrigger_lockout_ms = 1.0
+value = "rms"
+events = false
+
+[channel.2]
+name = "ch2"
+mode = "audio"
+in_range = [0.0, 2.0]
+out_range = [0.0, 10.0]
+smooth = 0.35
+gate_threshold = 1.0
+gate_hysteresis = 0.2
+retrigger_lockout_ms = 1.0
+value = "rms"
+events = false
+
+[channel.3]
+name = "ch3"
+mode = "clock"
+in_range = [0.0, 1.0]
+out_range = [0.0, 1.0]
+smooth = 0.0
+gate_threshold = 1.5
+gate_hysteresis = 0.4
+retrigger_lockout_ms = 2.0
+
+[channel.4]
+name = "ch4"
+mode = "audio"
+in_range = [0.0, 2.0]
+out_range = [0.0, 1.0]
+smooth = 0.35
+gate_threshold = 1.0
+gate_hysteresis = 0.2
+retrigger_lockout_ms = 1.0
+value = "rms"
+events = false
+
+[channel.5]
+name = "ch5"
+mode = "lfo"
+in_range = [0.0, 2.0]
+out_range = [0.0, 7.0]
+smooth = 0.0
+gate_threshold = 1.0
+gate_hysteresis = 0.2
+retrigger_lockout_ms = 1.0
+
+[channel.6]
+name = "ch6"
+mode = "lfo"
+in_range = [-5.0, 5.0]
+out_range = [0.0, 1.0]
+smooth = 0.0
+gate_threshold = 1.0
+gate_hysteresis = 0.2
+retrigger_lockout_ms = 1.0
+
+[channel.7]
+name = "ch7"
+mode = "lfo"
+in_range = [-5.0, 5.0]
+out_range = [0.0, 1.0]
+smooth = 0.0
+gate_threshold = 1.0
+gate_hysteresis = 0.2
+retrigger_lockout_ms = 1.0
+
+[channel.8]
+name = "ch8"
+mode = "lfo"
+in_range = [-5.0, 5.0]
+out_range = [0.0, 1.0]
+smooth = 0.0
+gate_threshold = 1.0
+gate_hysteresis = 0.2
+retrigger_lockout_ms = 1.0
